@@ -4,12 +4,16 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import type { Request, Response } from "express";
 import { loadConfig } from "./config.js";
 import { HistoryRepository } from "./history-repository.js";
+import { IntelligenceRepository } from "./intelligence-repository.js";
+import { IntelligenceService } from "./intelligence-service.js";
 import { LastFmClient } from "./lastfm-client.js";
 import { ListeningService } from "./listening-service.js";
 import { createLastFmMcpServer } from "./mcp-server.js";
+import { MusicBrainzClient } from "./musicbrainz-client.js";
 
 const config = loadConfig();
 const history = new HistoryRepository(config.historyDbPath);
+const intelligenceRepository = new IntelligenceRepository(config.historyDbPath);
 const lastfm = new LastFmClient({
   apiKey: config.lastfmApiKey,
   username: config.lastfmUsername,
@@ -25,9 +29,25 @@ const service = new ListeningService(
   config.lastfmUsername,
   config.historyLiveScanLimit,
   config.historyMaxSyncTracks,
+  config.mutationsEnabled,
+);
+const musicbrainz = new MusicBrainzClient({
+  userAgent: config.musicbrainzUserAgent,
+  baseUrl: config.musicbrainzBaseUrl,
+  timeoutMs: config.musicbrainzTimeoutMs,
+  maxRetries: config.musicbrainzMaxRetries,
+  minRequestIntervalMs: config.musicbrainzMinRequestIntervalMs,
+});
+const intelligence = new IntelligenceService(
+  lastfm,
+  musicbrainz,
+  intelligenceRepository,
+  history,
+  config.lastfmUsername,
+  config.mutationsEnabled,
 );
 
-const handler = createMcpHandler(() => createLastFmMcpServer(service));
+const handler = createMcpHandler(() => createLastFmMcpServer(service, intelligence));
 const nodeHandler = toNodeHandler(handler);
 const app = createMcpExpressApp({
   host: config.host,
@@ -38,8 +58,9 @@ app.get("/healthz", (_request: Request, response: Response) => {
   response.json({
     status: "ok",
     service: "lastfm-mcp",
-    version: "0.1.0",
+    version: "0.2.0",
     username: config.lastfmUsername,
+    mutationsEnabled: config.mutationsEnabled,
     history: service.getHistoryStatus(),
   });
 });
@@ -59,6 +80,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down`);
   httpServer.close();
   await handler.close();
+  intelligenceRepository.close();
   history.close();
 }
 

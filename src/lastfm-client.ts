@@ -187,6 +187,50 @@ export class LastFmClient implements LastFmApi {
     };
   }
 
+  async getArtistTopTracks(artistName: string, limit: number, autocorrect = true): Promise<TrackPlay[]> {
+    const response = await this.call("artist.getTopTracks", {
+      artist: artistName,
+      autocorrect: autocorrect ? 1 : 0,
+      limit: Math.min(limit, 1_000),
+    });
+    const container = record(response.toptracks);
+    return array(container.track).map((value, index) => {
+      const track = record(value);
+      const artist = record(track.artist);
+      return {
+        rank: rankOf(track, index),
+        name: text(track.name),
+        artist: text(artist.name) || artistName,
+        playcount: integer(track.playcount) ?? 0,
+        mbid: nullableText(track.mbid),
+        artistMbid: nullableText(artist.mbid),
+        url: text(track.url),
+      };
+    });
+  }
+
+  async getArtistTopAlbums(artistName: string, limit: number, autocorrect = true): Promise<AlbumPlay[]> {
+    const response = await this.call("artist.getTopAlbums", {
+      artist: artistName,
+      autocorrect: autocorrect ? 1 : 0,
+      limit: Math.min(limit, 1_000),
+    });
+    const container = record(response.topalbums);
+    return array(container.album).map((value, index) => {
+      const album = record(value);
+      const artist = record(album.artist);
+      return {
+        rank: rankOf(album, index),
+        name: text(album.name),
+        artist: text(artist.name) || artistName,
+        playcount: integer(album.playcount) ?? 0,
+        mbid: nullableText(album.mbid),
+        artistMbid: nullableText(artist.mbid),
+        url: text(album.url),
+      };
+    });
+  }
+
   private async call(
     method: string,
     params: Record<string, string | number | boolean | undefined>,
@@ -215,7 +259,7 @@ export class LastFmClient implements LastFmApi {
       try {
         await this.waitForRateLimit();
         const response = await this.fetchImpl(url, {
-          headers: { accept: "application/json", "user-agent": "lastfm-mcp/0.1.0" },
+          headers: { accept: "application/json", "user-agent": "lastfm-mcp/0.2.0" },
           signal: AbortSignal.timeout(this.options.timeoutMs),
         });
         const body = await parseJsonResponse(response);

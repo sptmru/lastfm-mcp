@@ -12,8 +12,10 @@ export type HistoryStatus = {
   oldestScrobbleAt: string | null;
   newestScrobbleAt: string | null;
   fullHistorySynced: boolean;
+  coveredThroughAt: string | null;
   lastSyncAt: string | null;
   lastSyncMode: string | null;
+  fullSyncInProgress: boolean;
 };
 
 export type HistorySearch = {
@@ -110,20 +112,58 @@ export class HistoryRepository {
       oldestScrobbleAt: toIso(nullableNumber(aggregate.oldest)),
       newestScrobbleAt: toIso(nullableNumber(aggregate.newest)),
       fullHistorySynced: numberOf(sync?.full_history_synced) === 1,
+      coveredThroughAt: toIso(nullableNumber(sync?.coverage_through_unix)),
       lastSyncAt: toIso(nullableNumber(sync?.last_sync_at_unix)),
       lastSyncMode: nullableString(sync?.last_sync_mode),
+      fullSyncInProgress: nullableNumber(sync?.full_sync_cursor_unix) !== null,
     };
   }
 
-  markSync(username: string, mode: string, completedFullHistory: boolean, nowUnix: number): void {
+  markSync(
+    username: string,
+    mode: string,
+    completedFullHistory: boolean,
+    nowUnix: number,
+    coverageThroughUnix?: number,
+  ): void {
     this.db.prepare(`
-      INSERT INTO sync_state (username, full_history_synced, last_sync_at_unix, last_sync_mode)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO sync_state (username, full_history_synced, last_sync_at_unix, last_sync_mode, coverage_through_unix)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(username) DO UPDATE SET
         full_history_synced = MAX(sync_state.full_history_synced, excluded.full_history_synced),
         last_sync_at_unix = excluded.last_sync_at_unix,
-        last_sync_mode = excluded.last_sync_mode
-    `).run(username, completedFullHistory ? 1 : 0, nowUnix, mode);
+        last_sync_mode = excluded.last_sync_mode,
+        coverage_through_unix = CASE
+          WHEN excluded.coverage_through_unix IS NULL THEN sync_state.coverage_through_unix
+          WHEN sync_state.coverage_through_unix IS NULL THEN excluded.coverage_through_unix
+          ELSE MAX(sync_state.coverage_through_unix, excluded.coverage_through_unix)
+        END
+    `).run(username, completedFullHistory ? 1 : 0, nowUnix, mode, coverageThroughUnix ?? null);
+  }
+
+  getFullSyncProgress(username: string): { cursorUnix: number; upperUnix: number } | null {
+    const row = this.db.prepare(`
+      SELECT full_sync_cursor_unix, full_sync_upper_unix FROM sync_state WHERE username = ?
+    `).get(username) as SqlRow | undefined;
+    const cursorUnix = nullableNumber(row?.full_sync_cursor_unix);
+    const upperUnix = nullableNumber(row?.full_sync_upper_unix);
+    return cursorUnix === null || upperUnix === null ? null : { cursorUnix, upperUnix };
+  }
+
+  setFullSyncProgress(username: string, cursorUnix: number, upperUnix: number): void {
+    this.db.prepare(`
+      INSERT INTO sync_state (username, full_history_synced, full_sync_cursor_unix, full_sync_upper_unix)
+      VALUES (?, 0, ?, ?)
+      ON CONFLICT(username) DO UPDATE SET
+        full_sync_cursor_unix = excluded.full_sync_cursor_unix,
+        full_sync_upper_unix = excluded.full_sync_upper_unix
+    `).run(username, cursorUnix, upperUnix);
+  }
+
+  clearFullSyncProgress(username: string): void {
+    this.db.prepare(`
+      UPDATE sync_state SET full_sync_cursor_unix = NULL, full_sync_upper_unix = NULL WHERE username = ?
+    `).run(username);
   }
 
   search(
@@ -266,9 +306,16 @@ export class HistoryRepository {
         username TEXT PRIMARY KEY,
         full_history_synced INTEGER NOT NULL DEFAULT 0,
         last_sync_at_unix INTEGER,
-        last_sync_mode TEXT
+        last_sync_mode TEXT,
+        coverage_through_unix INTEGER,
+        full_sync_cursor_unix INTEGER,
+        full_sync_upper_unix INTEGER
       );
     `);
+    const syncColumns = new Set((this.db.prepare("PRAGMA table_info(sync_state)").all() as SqlRow[]).map((row) => String(row.name)));
+    if (!syncColumns.has("coverage_through_unix")) this.db.exec("ALTER TABLE sync_state ADD COLUMN coverage_through_unix INTEGER");
+    if (!syncColumns.has("full_sync_cursor_unix")) this.db.exec("ALTER TABLE sync_state ADD COLUMN full_sync_cursor_unix INTEGER");
+    if (!syncColumns.has("full_sync_upper_unix")) this.db.exec("ALTER TABLE sync_state ADD COLUMN full_sync_upper_unix INTEGER");
   }
 }
 

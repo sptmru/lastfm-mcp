@@ -102,4 +102,6 @@ export interface LastFmApi {
     limit?: number;
   }): Promise<RecentTracksPage>;
   getArtistContext(artist: string, autocorrect: boolean): Promise<ArtistContext>;
+  getArtistTopTracks(artist: string, limit: number, autocorrect?: boolean): Promise<TrackPlay[]>;
+  getArtistTopAlbums(artist: string, limit: number, autocorrect?: boolean): Promise<AlbumPlay[]>;
 }

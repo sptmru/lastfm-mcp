@@ -2,10 +2,11 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vitest";
 import { createLastFmMcpServer } from "../src/mcp-server.js";
 import type { ListeningService } from "../src/listening-service.js";
+import type { IntelligenceService } from "../src/intelligence-service.js";
 
 describe("MCP server", () => {
   it("advertises the complete Last.fm tool surface over Streamable HTTP", async () => {
-    const handler = createMcpHandler(() => createLastFmMcpServer({} as ListeningService));
+    const handler = createMcpHandler(() => createLastFmMcpServer({} as ListeningService, {} as IntelligenceService));
     const response = await handler.fetch(
       new Request("http://localhost/mcp", {
         method: "POST",
@@ -37,9 +38,27 @@ describe("MCP server", () => {
       "compare_listening_periods",
       "get_taste_profile",
       "get_artist_context",
+      "resolve_canonical_entities",
+      "check_listening_exposure",
+      "get_artist_affinity",
+      "get_listening_sessions",
+      "get_album_exposure",
+      "get_listening_timeline",
+      "detect_listening_eras",
+      "get_artist_features",
+      "build_taste_graph",
+      "record_music_feedback",
+      "record_preference_signal",
+      "get_feedback_context",
+      "get_recommendations",
+      "exclude_recommendation",
+      "list_recommendation_exclusions",
+      "record_recommendation",
+      "evaluate_recommendations",
     ]);
     expect(payload.result.tools.find((tool) => tool.name === "get_taste_profile")?.annotations?.readOnlyHint).toBe(true);
     expect(payload.result.tools.find((tool) => tool.name === "sync_listening_history")?.annotations?.readOnlyHint).toBe(false);
+    expect(payload.result.tools.find((tool) => tool.name === "record_music_feedback")?.annotations?.readOnlyHint).toBe(false);
     await handler.close();
   });
 });

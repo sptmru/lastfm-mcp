@@ -8,8 +8,10 @@ describe("time helpers", () => {
     expect(parseDateTime("2024-08-01T04:00:00+04:00", "from")).toBe(1_722_470_400);
   });
 
-  it("rejects ambiguous local timestamps and reversed ranges", () => {
-    expect(() => parseDateTime("2024-08-01", "from")).toThrow(/timezone/);
+  it("accepts UTC date-only values but rejects ambiguous local date-times and reversed ranges", () => {
+    expect(parseDateTime("2024-08-01", "from")).toBe(1_722_470_400);
+    expect(parseDateTime("2024-08-01", "to")).toBe(1_722_556_799);
+    expect(() => parseDateTime("2024-08-01T12:00:00", "from")).toThrow(/timezone/);
     expect(() => assertDateRange(20, 10)).toThrow(/from/);
   });
 

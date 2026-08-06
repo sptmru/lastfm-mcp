@@ -13,8 +13,16 @@ export function parseDateTime(value: string | undefined, field: string): number 
     if (Number.isSafeInteger(seconds) && seconds >= 0) return seconds;
   }
 
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const milliseconds = Date.parse(`${trimmed}T00:00:00Z`);
+    if (Number.isFinite(milliseconds)) {
+      const startOfDay = Math.floor(milliseconds / 1_000);
+      return field === "to" ? startOfDay + 86_399 : startOfDay;
+    }
+  }
+
   if (!ISO_WITH_TIMEZONE.test(trimmed)) {
-    throw new Error(`${field} must be a Unix timestamp in seconds or ISO 8601 with a timezone`);
+    throw new Error(`${field} must be a Unix timestamp, YYYY-MM-DD (UTC), or ISO 8601 with a timezone`);
   }
 
   const milliseconds = Date.parse(trimmed);

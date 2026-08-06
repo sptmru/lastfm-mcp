@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { LASTFM_PERIODS } from "./domain.js";
+import type { IntelligenceService } from "./intelligence-service.js";
 import type { ListeningService } from "./listening-service.js";
+import { registerIntelligenceTools } from "./register-intelligence-tools.js";
 import { parseDateTime } from "./time.js";
 
 const periodSchema = z.enum(LASTFM_PERIODS).describe("Last.fm chart period.");
@@ -9,8 +11,8 @@ const topLimitSchema = z.number().int().min(1).max(1_000).default(100);
 const jsonObjectSchema = z.object({}).loose();
 const readOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
-export function createLastFmMcpServer(service: ListeningService): McpServer {
-  const server = new McpServer({ name: "lastfm-taste", version: "0.1.0" });
+export function createLastFmMcpServer(service: ListeningService, intelligence: IntelligenceService): McpServer {
+  const server = new McpServer({ name: "lastfm-taste", version: "0.2.0" });
 
   server.registerTool(
     "get_user_profile",
@@ -147,7 +149,7 @@ export function createLastFmMcpServer(service: ListeningService): McpServer {
         maxTracks: z.number().int().min(200).max(2_000_000).default(50_000),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     ({ mode, maxTracks }) => runTool(() => service.syncHistory(mode, maxTracks)),
   );
@@ -197,6 +199,8 @@ export function createLastFmMcpServer(service: ListeningService): McpServer {
     ({ artist, autocorrect }) => runTool(() => service.getArtistContext(artist, autocorrect)),
   );
 
+  registerIntelligenceTools(server, intelligence);
+
   return server;
 }
 
@@ -206,7 +210,7 @@ function dateSchema(description: string) {
     .trim()
     .min(1)
     .optional()
-    .describe(`${description}: Unix seconds or ISO 8601 including Z/UTC offset.`);
+    .describe(`${description}: Unix seconds, YYYY-MM-DD in UTC, or ISO 8601 including Z/UTC offset.`);
 }
 
 async function runTool(operation: () => Promise<unknown>) {

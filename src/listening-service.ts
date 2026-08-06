@@ -19,6 +19,7 @@ export class ListeningService {
     private readonly username: string,
     private readonly liveScanLimit: number,
     maxSyncTracks: number,
+    private readonly mutationsEnabled = true,
   ) {
     this.syncService = new HistorySyncService(api, history, username, maxSyncTracks);
   }
@@ -107,9 +108,11 @@ export class ListeningService {
     const status = this.history.getStatus(this.username);
     if (status.indexedScrobbles > 0) {
       const result = this.history.search(this.username, input);
-      const lastSyncUnix = result.status.lastSyncAt === null ? 0 : Math.floor(Date.parse(result.status.lastSyncAt) / 1_000);
+      const coveredThroughUnix = result.status.coveredThroughAt === null
+        ? 0
+        : Math.floor(Date.parse(result.status.coveredThroughAt) / 1_000);
       const requestedTo = input.to ?? Math.floor(Date.now() / 1_000);
-      const completeForRequestedRange = result.status.fullHistorySynced && requestedTo <= lastSyncUnix;
+      const completeForRequestedRange = result.status.fullHistorySynced && requestedTo <= coveredThroughUnix;
       return {
         username: this.username,
         source: "local_index",
@@ -134,6 +137,7 @@ export class ListeningService {
   }
 
   syncHistory(mode: SyncMode, maxTracks: number) {
+    if (!this.mutationsEnabled) throw new Error("Local MCP mutations are disabled. Set MCP_ENABLE_MUTATIONS=true only behind trusted access control.");
     return this.syncService.sync(mode, maxTracks);
   }
 
