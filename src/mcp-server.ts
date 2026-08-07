@@ -12,7 +12,7 @@ const jsonObjectSchema = z.object({}).loose();
 const readOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
 export function createLastFmMcpServer(service: ListeningService, intelligence: IntelligenceService): McpServer {
-  const server = new McpServer({ name: "lastfm-taste", version: "0.2.0" });
+  const server = new McpServer({ name: "lastfm-taste", version: "0.3.0" });
 
   server.registerTool(
     "get_user_profile",

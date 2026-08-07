@@ -1,6 +1,6 @@
 {
   "name": "lastfm-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A personal Last.fm taste and listening-history MCP server over Streamable HTTP.",
   "type": "module",
   "scripts": {

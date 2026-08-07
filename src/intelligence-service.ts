@@ -9,6 +9,7 @@ import {
 } from "./intelligence-repository.js";
 import {
   analyzeAlbumExposure,
+  buildListeningMatrix,
   buildListeningTimeline,
   calculateArtistAffinity,
   detectListeningEras,
@@ -23,6 +24,7 @@ export const EXPOSURE_LEVELS = ["unheard", "sampled", "explored", "established",
 export type ExposureLevel = (typeof EXPOSURE_LEVELS)[number];
 export const RECOMMENDATION_MODES = ["safe", "bridge", "explore"] as const;
 export type RecommendationMode = (typeof RECOMMENDATION_MODES)[number];
+const MIN_PLAUSIBLE_LASTFM_TIMESTAMP = Date.UTC(2002, 0, 1) / 1_000;
 
 export class IntelligenceService {
   constructor(
@@ -227,11 +229,61 @@ export class IntelligenceService {
     return { ...(await this.buildTagTimeline(scrobbles, common)), history: this.historyEvidence() };
   }
 
-  detectListeningEras(input: { minDurationDays: number; maxEras: number }) {
-    const scrobbles = this.requireScrobbles();
-    const result = detectListeningEras(scrobbles, input);
+  getListeningMatrix(input: {
+    from?: number;
+    to?: number;
+    bucket: TimelineBucketUnit;
+    dimension: "artist" | "album";
+    minPlays: number;
+    entityOffset: number;
+    limitEntities?: number;
+    includeEmptyBuckets: boolean;
+    maxCells: number;
+  }) {
+    assertDateRange(input.from, input.to);
+    const scrobbles = this.requireScrobbles({
+      ...(input.from === undefined ? {} : { from: input.from }),
+      ...(input.to === undefined ? {} : { to: input.to }),
+    });
+    const result = buildListeningMatrix(scrobbles, {
+      ...(input.from === undefined ? {} : { from: input.from }),
+      ...(input.to === undefined ? {} : { to: input.to }),
+      bucket: input.bucket,
+      dimension: input.dimension,
+      minimumTimestamp: MIN_PLAUSIBLE_LASTFM_TIMESTAMP,
+      minPlays: input.minPlays,
+      entityOffset: input.entityOffset,
+      ...(input.limitEntities === undefined ? {} : { limitEntities: input.limitEntities }),
+      includeEmptyBuckets: input.includeEmptyBuckets,
+      maxCells: input.maxCells,
+    });
     return {
       ...result,
+      from: toIso(result.from),
+      to: toIso(result.to),
+      minimumTimestamp: toIso(result.minimumTimestamp),
+      buckets: result.buckets.map((bucket) => ({
+        ...bucket,
+        start: toIso(bucket.start),
+        endExclusive: toIso(bucket.endExclusive),
+      })),
+      entities: result.entities.map((entity) => ({
+        ...entity,
+        firstPlayedAt: toIso(entity.firstPlayedAt),
+        lastPlayedAt: toIso(entity.lastPlayedAt),
+      })),
+      history: this.historyEvidence(),
+    };
+  }
+
+  detectListeningEras(input: { minDurationDays: number; maxEras: number }) {
+    const scrobbles = this.requireScrobbles();
+    const datedScrobbles = scrobbles.filter((item) => item.timestamp >= MIN_PLAUSIBLE_LASTFM_TIMESTAMP);
+    const result = detectListeningEras(datedScrobbles, input);
+    return {
+      ...result,
+      minimumTimestamp: toIso(MIN_PLAUSIBLE_LASTFM_TIMESTAMP),
+      excludedBeforeMinimumTimestamp: scrobbles.length - datedScrobbles.length,
       eras: result.eras.map((era) => ({ ...era, start: toIso(era.start), endExclusive: toIso(era.endExclusive) })),
       monthlyEvidence: result.monthlyEvidence.map((month) => ({ ...month, start: toIso(month.start), endExclusive: toIso(month.endExclusive) })),
       history: this.historyEvidence(),

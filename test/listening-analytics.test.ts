@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeAlbumExposure,
+  buildListeningMatrix,
   buildListeningTimeline,
   calculateArtistAffinity,
   detectListeningEras,
@@ -161,6 +162,129 @@ describe("buildListeningTimeline", () => {
     expect(timeline.buckets.map((bucket) => bucket.label)).toEqual(["2025-12-29", "2026-01-05"]);
     expect(timeline.buckets[1]).toMatchObject({ totalPlays: 2, omittedPlays: 1 });
     expect(timeline.buckets[1]?.items[0]).toMatchObject({ artist: "ARTIST", album: "album", plays: 1, share: 0.5 });
+  });
+});
+
+describe("buildListeningMatrix", () => {
+  it("builds stable global columns, preserves empty buckets, and exposes burst evidence and filtering coverage", () => {
+    const history = [
+      play("2026-01-20T18:00:00Z", "Alpha", "A1"),
+      play("2026-01-20T18:03:00Z", "ALPHA", "A2"),
+      play("2026-02-10T12:00:00Z", "Alpha", "A3"),
+      play("2026-02-14T20:00:00Z", "Burst", "B1"),
+      play("2026-02-14T20:04:00Z", "Burst", "B2"),
+      play("2026-04-01T00:00:00Z", "Long Tail", "C1"),
+    ];
+
+    const result = buildListeningMatrix(history, {
+      from: at("2026-01-15T00:00:00Z"),
+      to: at("2026-04-15T23:59:59Z"),
+      bucket: "month",
+      dimension: "artist",
+      limitEntities: 2,
+    });
+
+    expect(result.buckets.map((bucket) => bucket.label)).toEqual(["2026-01", "2026-02", "2026-03", "2026-04"]);
+    expect(result.entities.map((entity) => [entity.artist, entity.totalPlays])).toEqual([
+      ["Alpha", 3],
+      ["Burst", 2],
+    ]);
+    expect(result.entities.map((entity) => entity.rank)).toEqual([1, 2]);
+    expect(result.matrix).toMatchObject({
+      format: "sparse_coordinate",
+      dimensions: { buckets: 4, entities: 2 },
+      cellColumns: ["bucketIndex", "entityIndex", "plays", "activeDays"],
+      cells: [
+        [0, 0, 2, 1],
+        [1, 0, 1, 1],
+        [1, 1, 2, 1],
+      ],
+    });
+    expect(result.entities[0]).toMatchObject({
+      activeDays: 2,
+      activeBuckets: 2,
+      peakBucketIndex: 0,
+      peakBucketShare: 0.6667,
+      maxDayPlays: 2,
+      maxDayShare: 0.6667,
+      activeSpanBuckets: 2,
+      bucketDensity: 1,
+    });
+    expect(result.buckets[2]).toMatchObject({ totalPlays: 0, selectedPlays: 0, omittedPlays: 0 });
+    expect(result.buckets[3]).toMatchObject({ totalPlays: 1, selectedPlays: 0, omittedPlays: 1 });
+    expect(result.filtering).toMatchObject({
+      totalEntities: 3,
+      eligibleEntities: 3,
+      excludedByMinPlays: 0,
+      returnedEntities: 2,
+      omittedEntities: 1,
+      omittedBeforePage: 0,
+      omittedAfterPage: 1,
+      hasMoreEntities: true,
+      nextEntityOffset: 2,
+      eligiblePlays: 6,
+      eligiblePlayCoverage: 1,
+      includedPlays: 5,
+      omittedPlays: 1,
+      playCoverage: 0.8333,
+      complete: false,
+    });
+  });
+
+  it("continues stable globally ranked entity columns from an explicit page offset", () => {
+    const result = buildListeningMatrix([
+      play("2026-01-01T00:00:00Z", "Alpha", "One"),
+      play("2026-01-01T00:01:00Z", "Alpha", "Two"),
+      play("2026-01-01T00:02:00Z", "Beta", "One"),
+      play("2026-01-01T00:03:00Z", "Gamma", "One"),
+    ], {
+      bucket: "month",
+      dimension: "artist",
+      entityOffset: 1,
+      limitEntities: 1,
+    });
+
+    expect(result.entities).toHaveLength(1);
+    expect(result.entities[0]).toMatchObject({ artist: "Beta", index: 0, rank: 2 });
+    expect(result.matrix.cells).toEqual([[0, 0, 1, 1]]);
+    expect(result.filtering).toMatchObject({
+      entityOffset: 1,
+      omittedBeforePage: 1,
+      omittedAfterPage: 1,
+      hasMoreEntities: true,
+      nextEntityOffset: 2,
+    });
+  });
+
+  it("reports but does not place implausibly early placeholder timestamps on the temporal axis", () => {
+    const result = buildListeningMatrix([
+      { timestamp: 1, artist: "Undated", track: "Imported" },
+      play("2026-01-01T00:00:00Z", "Dated", "Scrobble"),
+    ], {
+      bucket: "month",
+      dimension: "artist",
+      minimumTimestamp: at("2002-01-01T00:00:00Z"),
+    });
+
+    expect(result).toMatchObject({
+      scrobblesInRange: 2,
+      minimumTimestamp: at("2002-01-01T00:00:00Z"),
+      excludedBeforeMinimumTimestamp: 1,
+      dimensionPlaysInRange: 1,
+    });
+    expect(result.buckets.map((bucket) => bucket.label)).toEqual(["2026-01"]);
+    expect(result.entities.map((entity) => entity.artist)).toEqual(["Dated"]);
+  });
+
+  it("fails instead of silently truncating an oversized sparse matrix", () => {
+    expect(() => buildListeningMatrix([
+      play("2026-01-01T00:00:00Z", "A", "One"),
+      play("2026-01-01T00:01:00Z", "B", "Two"),
+    ], {
+      bucket: "month",
+      dimension: "artist",
+      maxCells: 1,
+    })).toThrow(/above maxCells=1/);
   });
 });
 

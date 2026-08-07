@@ -58,7 +58,7 @@ app.get("/healthz", (_request: Request, response: Response) => {
   response.json({
     status: "ok",
     service: "lastfm-mcp",
-    version: "0.2.0",
+    version: "0.3.0",
     username: config.lastfmUsername,
     mutationsEnabled: config.mutationsEnabled,
     history: service.getHistoryStatus(),

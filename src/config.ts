@@ -15,7 +15,7 @@ const envSchema = z.object({
   LASTFM_MIN_REQUEST_INTERVAL_MS: z.coerce.number().int().min(0).max(10_000).default(250),
   LASTFM_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).max(86_400).default(300),
   MUSICBRAINZ_BASE_URL: z.url().default("https://musicbrainz.org/ws/2/"),
-  MUSICBRAINZ_USER_AGENT: z.string().trim().min(1).default("lastfm-mcp/0.2.0 (https://lastfm.mcp.sptm.online/)"),
+  MUSICBRAINZ_USER_AGENT: z.string().trim().min(1).default("lastfm-mcp/0.3.0 (https://lastfm.mcp.sptm.online/)"),
   MUSICBRAINZ_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(10_000),
   MUSICBRAINZ_MAX_RETRIES: z.coerce.number().int().min(0).max(8).default(2),
   MUSICBRAINZ_MIN_REQUEST_INTERVAL_MS: z.coerce.number().int().min(1_000).max(30_000).default(1_100),

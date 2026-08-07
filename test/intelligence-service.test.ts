@@ -89,6 +89,16 @@ describe("IntelligenceService recommendations", () => {
     const affinity = await service.getArtistAffinity("Artist feat. Guest");
     const exposure = await service.getAlbumExposure("Artist feat. Guest", "Album (Deluxe Edition)");
     const sessions = service.getListeningSessions({ artist: "Artist", gapMinutes: 45, limit: 10 });
+    const matrix = service.getListeningMatrix({
+      from: start,
+      to: start + 180,
+      bucket: "day",
+      dimension: "artist",
+      minPlays: 1,
+      entityOffset: 0,
+      includeEmptyBuckets: true,
+      maxCells: 100,
+    });
 
     expect(affinity.totalPlays).toBe(2);
     expect(exposure).toMatchObject({ runCount: 2, fullRuns: 0, nearFullRuns: 0 });
@@ -96,6 +106,15 @@ describe("IntelligenceService recommendations", () => {
       { artist: "Artist", plays: 2 },
       { artist: "Other", plays: 1 },
     ]));
+    expect(matrix).toMatchObject({
+      from: new Date(start * 1000).toISOString(),
+      to: new Date((start + 180) * 1000).toISOString(),
+      minimumTimestamp: "2002-01-01T00:00:00.000Z",
+      matrix: { dimensions: { buckets: 1, entities: 2 } },
+      filtering: { complete: true, playCoverage: 1 },
+      history: { fullHistorySynced: true },
+    });
+    expect(matrix.entities[0]?.firstPlayedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     const locked = new IntelligenceService({} as LastFmApi, musicbrainz, repository, history, "listener", false);
     expect(() => locked.recordMusicFeedback({ artist: "Artist", verdict: "like" })).toThrow(/mutations are disabled/i);
     expect(() => locked.getFeedbackContext(10)).toThrow(/private preference data is disabled/i);

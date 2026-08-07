@@ -44,6 +44,7 @@ describe("MCP server", () => {
       "get_listening_sessions",
       "get_album_exposure",
       "get_listening_timeline",
+      "get_listening_matrix",
       "detect_listening_eras",
       "get_artist_features",
       "build_taste_graph",

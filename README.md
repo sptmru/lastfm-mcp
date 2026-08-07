@@ -26,6 +26,7 @@ The server uses only read-only Last.fm and MusicBrainz methods. API credentials 
 | `get_listening_sessions` | Session grouping with configurable inactivity gap |
 | `get_album_exposure` | Track coverage, ordered runs, stopping points, and returns using MusicBrainz tracklists |
 | `get_listening_timeline` | Arbitrary UTC ranges and day/week/month/year buckets by artist, album, or tag |
+| `get_listening_matrix` | Pageable sparse time-bucket × artist/album matrix with global window totals, active days, concentration, and explicit coverage |
 | `detect_listening_eras` | Statistical change points in monthly listening distributions |
 | `get_artist_features` | Combined Last.fm tags/similarity and MusicBrainz metadata/relationships |
 | `build_taste_graph` | Artists, albums, tags, sessions, eras, external similarity, and preference edges |
@@ -65,7 +66,7 @@ LASTFM_API_KEY=your-api-key
 LASTFM_USERNAME=your-lastfm-username
 MCP_ALLOWED_HOSTS=localhost,127.0.0.1
 MCP_ENABLE_MUTATIONS=false
-MUSICBRAINZ_USER_AGENT=lastfm-mcp/0.2.0 (https://your-domain.example/)
+MUSICBRAINZ_USER_AGENT=lastfm-mcp/0.3.0 (https://your-domain.example/)
 ```
 
 Start the service:
@@ -112,6 +113,19 @@ The index is stored in the `lastfm-data` named volume as normalized SQLite data 
 
 The full sync is foundational: without it, first-listen dates, long-term returns, eras, exposure filtering, and recommendation evaluation can be incomplete. Every affected response includes the current history status and a caveat when `fullHistorySynced=false`.
 
+### Exact window and era analysis
+
+`get_listening_matrix` is the raw statistical surface for custom era analysis. It selects artist or album columns using totals across the complete requested window—not a separate top list inside each bucket—and returns a compact sparse coordinate matrix:
+
+- `buckets` contains UTC boundaries, total plays, active days, selected plays, and omitted plays;
+- `entities` contains whole-window totals, active days/buckets, first and last play, peak bucket/day concentration, active span, and bucket density;
+- `matrix.cells` uses `[bucketIndex, entityIndex, plays, activeDays]`; a missing cell means zero plays;
+- `filtering` reports exact play coverage, page position, and every omission caused by `minPlays` or entity pagination.
+
+The default `bucket=month`, `dimension=artist`, and `minPlays=1` starts an exact month × artist matrix in globally ranked pages of 250 entities. No per-month top-N truncation is applied. Re-call the tool with `entityOffset=filtering.nextEntityOffset` until that value is `null`; entity `rank` remains global while `index` addresses the current page's matrix cells. Increase `limitEntities` up to 5,000 when the client can accept a larger response. The ordinary text result stays compact while the complete page is returned in `structuredContent`, preserving ChatGPT context. If a sparse page exceeds `maxCells`, the call fails with narrowing options instead of silently dropping evidence. `activeDays`, `maxDayShare`, and `bucketDensity` help distinguish a one-evening spike from gradual discovery and recurring affinity.
+
+Last.fm can expose imported or undated records with placeholder Unix timestamps near the 1970 epoch. The matrix and era detector keep those rows in the local history but exclude timestamps before `2002-01-01T00:00:00Z` from temporal evidence. Responses expose `minimumTimestamp` and `excludedBeforeMinimumTimestamp`, so this cleanup is explicit rather than silently rewriting dates or deleting plays.
+
 ## 4. Make the endpoint reachable by ChatGPT
 
 ChatGPT cannot connect directly to `localhost`; it needs a remote HTTPS endpoint. The recommended setup is to keep the Compose port bound to `127.0.0.1` and run a reverse proxy such as Caddy on the same server:
@@ -145,7 +159,7 @@ Current flow in ChatGPT web:
 2. Open `Settings → Apps → Create`.
 3. Enter a name such as `My Last.fm` and the endpoint `https://mcp.example.com/mcp`. For this deployment, use `https://lastfm.mcp.sptm.online/mcp`.
 4. Select **No authentication** only for a read-only deployment or an endpoint already protected by a private tunnel. Use an OAuth 2.1 gateway before enabling mutations on a public hostname.
-5. Click **Scan Tools**, wait for all 29 tools to appear, and create the app. If the app was created against v0.1, rescan or recreate it so ChatGPT discovers the new tools.
+5. Click **Scan Tools**, wait for all 30 tools to appear, and create the app. If the app was created against an older version, rescan or recreate it so ChatGPT discovers the new tools.
 6. Enable the app from the tools menu in a new chat.
 
 Example first prompt:
@@ -158,7 +172,7 @@ Recommendation-oriented prompt:
 
 Deep-history prompt:
 
-> Detect my listening eras, inspect the current era and taste graph, then explain which artists bridge two otherwise separate clusters. Treat incomplete history or missing MusicBrainz tracklists as caveats, not facts.
+> Call get_listening_matrix for my complete history with bucket=month, dimension=artist, and minPlays=1. Continue through entityOffset pages until filtering.nextEntityOffset is null. Combine columns by entity rank/key, then use the sparse matrix, active-day evidence, and normalized monthly shares to calculate change points, identify artists shared by adjacent eras, and distinguish one-evening spikes from gradual discoveries. Report aggregate coverage before interpreting the result, then compare your boundaries with detect_listening_eras.
 
 Developer mode and custom MCP app availability depend on your plan and workspace settings. See the [official ChatGPT instructions](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt-beta) for current details.
 

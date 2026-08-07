@@ -144,6 +144,98 @@ export type ListeningTimelineResult = {
   methodology: string;
 };
 
+export type ListeningMatrixOptions = {
+  from?: number;
+  to?: number;
+  bucket: TimelineBucketUnit;
+  dimension: TimelineDimension;
+  minimumTimestamp?: number;
+  minPlays?: number;
+  entityOffset?: number;
+  limitEntities?: number;
+  includeEmptyBuckets?: boolean;
+  maxCells?: number;
+};
+
+export type ListeningMatrixCell = [
+  bucketIndex: number,
+  entityIndex: number,
+  plays: number,
+  activeDays: number,
+];
+
+export type ListeningMatrixResult = {
+  bucket: TimelineBucketUnit;
+  dimension: TimelineDimension;
+  from: number | null;
+  to: number | null;
+  scrobblesInRange: number;
+  minimumTimestamp: number | null;
+  excludedBeforeMinimumTimestamp: number;
+  dimensionPlaysInRange: number;
+  excludedMissingDimension: number;
+  buckets: Array<{
+    index: number;
+    start: number;
+    endExclusive: number;
+    label: string;
+    totalPlays: number;
+    selectedPlays: number;
+    omittedPlays: number;
+    activeDays: number;
+    entityCount: number;
+  }>;
+  entities: Array<{
+    index: number;
+    rank: number;
+    key: string;
+    artist: string;
+    album: string | null;
+    totalPlays: number;
+    activeDays: number;
+    activeBuckets: number;
+    firstPlayedAt: number;
+    lastPlayedAt: number;
+    firstBucketIndex: number;
+    lastBucketIndex: number;
+    peakBucketIndex: number;
+    peakBucketPlays: number;
+    peakBucketShare: number;
+    maxDayPlays: number;
+    maxDayShare: number;
+    activeSpanBuckets: number;
+    bucketDensity: number;
+    playsPerActiveDay: number;
+  }>;
+  matrix: {
+    format: "sparse_coordinate";
+    dimensions: { buckets: number; entities: number };
+    cellColumns: ["bucketIndex", "entityIndex", "plays", "activeDays"];
+    cells: ListeningMatrixCell[];
+  };
+  filtering: {
+    minPlays: number;
+    entityOffset: number;
+    limitEntities: number | null;
+    totalEntities: number;
+    eligibleEntities: number;
+    excludedByMinPlays: number;
+    returnedEntities: number;
+    omittedEntities: number;
+    omittedBeforePage: number;
+    omittedAfterPage: number;
+    hasMoreEntities: boolean;
+    nextEntityOffset: number | null;
+    eligiblePlays: number;
+    eligiblePlayCoverage: number;
+    includedPlays: number;
+    omittedPlays: number;
+    playCoverage: number;
+    complete: boolean;
+  };
+  methodology: string[];
+};
+
 export type EraDetectionOptions = {
   minDurationDays?: number;
   maxEras?: number;
@@ -569,6 +661,257 @@ export function buildListeningTimeline(
     excludedMissingDimension,
     buckets,
     methodology: `UTC calendar ${options.bucket} buckets; weeks begin Monday. Names are NFKC/case-normalized, and empty buckets are omitted.`,
+  };
+}
+
+export function buildListeningMatrix(
+  scrobbles: readonly AnalyticsScrobble[],
+  options: ListeningMatrixOptions,
+): ListeningMatrixResult {
+  assertOptionalTimestamp(options.from, "from");
+  assertOptionalTimestamp(options.to, "to");
+  assertOptionalTimestamp(options.minimumTimestamp, "minimumTimestamp");
+  if (options.from !== undefined && options.to !== undefined && options.from > options.to) {
+    throw new Error("from must be less than or equal to to");
+  }
+  const minPlays = options.minPlays ?? 1;
+  const entityOffset = options.entityOffset ?? 0;
+  const includeEmptyBuckets = options.includeEmptyBuckets ?? true;
+  const maxCells = options.maxCells ?? 100_000;
+  if (!Number.isInteger(minPlays) || minPlays < 1) throw new Error("minPlays must be a positive integer");
+  if (!Number.isInteger(entityOffset) || entityOffset < 0) throw new Error("entityOffset must be a non-negative integer");
+  if (options.limitEntities !== undefined && (!Number.isInteger(options.limitEntities) || options.limitEntities < 1)) {
+    throw new Error("limitEntities must be a positive integer");
+  }
+  if (!Number.isInteger(maxCells) || maxCells < 1) throw new Error("maxCells must be a positive integer");
+
+  const inRequestedRange = sortedScrobbles(scrobbles).filter((item) =>
+    (options.from === undefined || item.timestamp >= options.from)
+    && (options.to === undefined || item.timestamp <= options.to));
+  const sorted = options.minimumTimestamp === undefined
+    ? inRequestedRange
+    : inRequestedRange.filter((item) => item.timestamp >= options.minimumTimestamp!);
+  const excludedBeforeMinimumTimestamp = inRequestedRange.length - sorted.length;
+  type MutableCell = { plays: number; days: Set<string> };
+  type MutableEntity = {
+    key: string;
+    artist: string;
+    album: string | null;
+    totalPlays: number;
+    activeDays: Set<string>;
+    dayCounts: Map<string, number>;
+    firstPlayedAt: number;
+    lastPlayedAt: number;
+    cells: Map<number, MutableCell>;
+  };
+  const entitiesByKey = new Map<string, MutableEntity>();
+  const bucketTotals = new Map<number, number>();
+  const bucketDays = new Map<number, Set<string>>();
+  let excludedMissingDimension = 0;
+
+  for (const item of sorted) {
+    if (options.dimension === "album" && !hasText(item.album)) {
+      excludedMissingDimension += 1;
+      continue;
+    }
+    const start = bucketStart(item.timestamp, options.bucket);
+    const day = utcDay(item.timestamp);
+    bucketTotals.set(start, (bucketTotals.get(start) ?? 0) + 1);
+    let days = bucketDays.get(start);
+    if (!days) {
+      days = new Set();
+      bucketDays.set(start, days);
+    }
+    days.add(day);
+
+    const artist = cleanDisplay(item.artist);
+    const album = options.dimension === "album" ? cleanDisplay(item.album as string) : null;
+    const key = options.dimension === "artist"
+      ? normalize(item.artist)
+      : `${normalize(item.artist)}\u0000${normalize(item.album as string)}`;
+    let entity = entitiesByKey.get(key);
+    if (!entity) {
+      entity = {
+        key,
+        artist,
+        album,
+        totalPlays: 0,
+        activeDays: new Set(),
+        dayCounts: new Map(),
+        firstPlayedAt: item.timestamp,
+        lastPlayedAt: item.timestamp,
+        cells: new Map(),
+      };
+      entitiesByKey.set(key, entity);
+    }
+    entity.totalPlays += 1;
+    entity.activeDays.add(day);
+    entity.dayCounts.set(day, (entity.dayCounts.get(day) ?? 0) + 1);
+    entity.firstPlayedAt = Math.min(entity.firstPlayedAt, item.timestamp);
+    entity.lastPlayedAt = Math.max(entity.lastPlayedAt, item.timestamp);
+    let cell = entity.cells.get(start);
+    if (!cell) {
+      cell = { plays: 0, days: new Set() };
+      entity.cells.set(start, cell);
+    }
+    cell.plays += 1;
+    cell.days.add(day);
+  }
+
+  const from = options.from ?? sorted[0]?.timestamp ?? null;
+  const to = options.to ?? sorted.at(-1)?.timestamp ?? null;
+  const allBucketStarts: number[] = [];
+  if (from !== null && to !== null) {
+    let start = bucketStart(from, options.bucket);
+    const last = bucketStart(to, options.bucket);
+    while (start <= last) {
+      allBucketStarts.push(start);
+      if (allBucketStarts.length > 10_000) {
+        throw new Error("The requested matrix exceeds 10,000 time buckets. Use a coarser bucket or a narrower range.");
+      }
+      start = nextBucketStart(start, options.bucket);
+    }
+  }
+  const returnedBucketStarts = includeEmptyBuckets
+    ? allBucketStarts
+    : allBucketStarts.filter((start) => (bucketTotals.get(start) ?? 0) > 0);
+  const bucketIndexByStart = new Map(returnedBucketStarts.map((start, index) => [start, index]));
+  const fullBucketIndexByStart = new Map(allBucketStarts.map((start, index) => [start, index]));
+
+  const allEntities = [...entitiesByKey.values()]
+    .sort((a, b) => countThenKey(a.totalPlays, b.totalPlays, a.key, b.key));
+  const eligibleEntities = allEntities.filter((entity) => entity.totalPlays >= minPlays);
+  const pageEnd = options.limitEntities === undefined ? undefined : entityOffset + options.limitEntities;
+  const selectedEntities = eligibleEntities.slice(entityOffset, pageEnd);
+  const selectedPlaysByBucket = new Map<number, number>();
+  const entityCountByBucket = new Map<number, number>();
+  const cells: ListeningMatrixCell[] = [];
+
+  for (const [entityIndex, entity] of selectedEntities.entries()) {
+    for (const [start, cell] of entity.cells) {
+      const bucketIndex = bucketIndexByStart.get(start);
+      if (bucketIndex === undefined) continue;
+      cells.push([bucketIndex, entityIndex, cell.plays, cell.days.size]);
+      selectedPlaysByBucket.set(start, (selectedPlaysByBucket.get(start) ?? 0) + cell.plays);
+      entityCountByBucket.set(start, (entityCountByBucket.get(start) ?? 0) + 1);
+    }
+  }
+  cells.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (cells.length > maxCells) {
+    throw new Error(`The matrix contains ${cells.length} non-zero cells, above maxCells=${maxCells}. Narrow the range, raise minPlays, set limitEntities, or increase maxCells.`);
+  }
+
+  const entities = selectedEntities.map((entity, index) => {
+    const cellEntries = [...entity.cells.entries()].sort(([a], [b]) => a - b);
+    const firstBucketStart = cellEntries[0]?.[0] as number;
+    const lastBucketStart = cellEntries.at(-1)?.[0] as number;
+    const peakBucket = cellEntries.reduce((best, current) =>
+      current[1].plays > best[1].plays ? current : best);
+    const maxDayPlays = Math.max(...entity.dayCounts.values());
+    const firstBucketIndex = bucketIndexByStart.get(firstBucketStart);
+    const lastBucketIndex = bucketIndexByStart.get(lastBucketStart);
+    const peakBucketIndex = bucketIndexByStart.get(peakBucket[0]);
+    const fullFirstIndex = fullBucketIndexByStart.get(firstBucketStart) ?? 0;
+    const fullLastIndex = fullBucketIndexByStart.get(lastBucketStart) ?? fullFirstIndex;
+    const activeSpanBuckets = fullLastIndex - fullFirstIndex + 1;
+    if (firstBucketIndex === undefined || lastBucketIndex === undefined || peakBucketIndex === undefined) {
+      throw new Error("Internal matrix bucket indexing error");
+    }
+    return {
+      index,
+      rank: entityOffset + index + 1,
+      key: entity.key,
+      artist: entity.artist,
+      album: entity.album,
+      totalPlays: entity.totalPlays,
+      activeDays: entity.activeDays.size,
+      activeBuckets: entity.cells.size,
+      firstPlayedAt: entity.firstPlayedAt,
+      lastPlayedAt: entity.lastPlayedAt,
+      firstBucketIndex,
+      lastBucketIndex,
+      peakBucketIndex,
+      peakBucketPlays: peakBucket[1].plays,
+      peakBucketShare: round(peakBucket[1].plays / entity.totalPlays),
+      maxDayPlays,
+      maxDayShare: round(maxDayPlays / entity.totalPlays),
+      activeSpanBuckets,
+      bucketDensity: round(entity.cells.size / activeSpanBuckets),
+      playsPerActiveDay: round(entity.totalPlays / entity.activeDays.size),
+    };
+  });
+
+  const buckets = returnedBucketStarts.map((start, index) => {
+    const totalPlays = bucketTotals.get(start) ?? 0;
+    const selectedPlays = selectedPlaysByBucket.get(start) ?? 0;
+    return {
+      index,
+      start,
+      endExclusive: nextBucketStart(start, options.bucket),
+      label: bucketLabel(start, options.bucket),
+      totalPlays,
+      selectedPlays,
+      omittedPlays: totalPlays - selectedPlays,
+      activeDays: bucketDays.get(start)?.size ?? 0,
+      entityCount: entityCountByBucket.get(start) ?? 0,
+    };
+  });
+  const dimensionPlaysInRange = sorted.length - excludedMissingDimension;
+  const eligiblePlays = eligibleEntities.reduce((sum, entity) => sum + entity.totalPlays, 0);
+  const includedPlays = selectedEntities.reduce((sum, entity) => sum + entity.totalPlays, 0);
+  const omittedPlays = dimensionPlaysInRange - includedPlays;
+  const nextEntityOffset = entityOffset + selectedEntities.length < eligibleEntities.length
+    ? entityOffset + selectedEntities.length
+    : null;
+
+  return {
+    bucket: options.bucket,
+    dimension: options.dimension,
+    from,
+    to,
+    scrobblesInRange: inRequestedRange.length,
+    minimumTimestamp: options.minimumTimestamp ?? null,
+    excludedBeforeMinimumTimestamp,
+    dimensionPlaysInRange,
+    excludedMissingDimension,
+    buckets,
+    entities,
+    matrix: {
+      format: "sparse_coordinate",
+      dimensions: { buckets: buckets.length, entities: entities.length },
+      cellColumns: ["bucketIndex", "entityIndex", "plays", "activeDays"],
+      cells,
+    },
+    filtering: {
+      minPlays,
+      entityOffset,
+      limitEntities: options.limitEntities ?? null,
+      totalEntities: allEntities.length,
+      eligibleEntities: eligibleEntities.length,
+      excludedByMinPlays: allEntities.length - eligibleEntities.length,
+      returnedEntities: entities.length,
+      omittedEntities: allEntities.length - entities.length,
+      omittedBeforePage: Math.min(entityOffset, eligibleEntities.length),
+      omittedAfterPage: Math.max(eligibleEntities.length - entityOffset - entities.length, 0),
+      hasMoreEntities: nextEntityOffset !== null,
+      nextEntityOffset,
+      eligiblePlays,
+      eligiblePlayCoverage: dimensionPlaysInRange === 0 ? 1 : round(eligiblePlays / dimensionPlaysInRange),
+      includedPlays,
+      omittedPlays,
+      playCoverage: dimensionPlaysInRange === 0 ? 1 : round(includedPlays / dimensionPlaysInRange),
+      complete: omittedPlays === 0,
+    },
+    methodology: [
+      `UTC calendar ${options.bucket} buckets; weeks begin Monday. Boundary buckets may cover only part of the requested range.`,
+      options.minimumTimestamp === undefined
+        ? "No lower plausibility bound was applied to scrobble timestamps."
+        : `Scrobbles before ${new Date(options.minimumTimestamp * 1_000).toISOString()} are counted in excludedBeforeMinimumTimestamp but omitted from temporal evidence.`,
+      "Entities are selected by total plays across the entire requested range, never independently per bucket. This keeps matrix columns statistically consistent over time.",
+      "The matrix uses sparse coordinate rows [bucketIndex, entityIndex, plays, activeDays]. A missing cell means zero plays.",
+      "Entity active-day, peak-day, span, and density fields distinguish concentrated bursts from gradual or recurring adoption.",
+      "Filtering and playCoverage explicitly report evidence omitted by minPlays or the current entity page. Continue with nextEntityOffset until null to reconstruct all eligible columns; maxCells fails instead of silently truncating.",
+    ],
   };
 }
 

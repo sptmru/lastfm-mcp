@@ -259,7 +259,7 @@ export class LastFmClient implements LastFmApi {
       try {
         await this.waitForRateLimit();
         const response = await this.fetchImpl(url, {
-          headers: { accept: "application/json", "user-agent": "lastfm-mcp/0.2.0" },
+          headers: { accept: "application/json", "user-agent": "lastfm-mcp/0.3.0" },
           signal: AbortSignal.timeout(this.options.timeoutMs),
         });
         const body = await parseJsonResponse(response);

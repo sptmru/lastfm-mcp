@@ -119,6 +119,38 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
   );
 
   server.registerTool(
+    "get_listening_matrix",
+    {
+      title: "Build listening matrix",
+      description: "Build a statistically consistent, pageable sparse time-bucket by artist or album matrix over any local-history range, with global window totals, active-day evidence, burst/concentration metrics, empty buckets, and explicit filtering coverage. Follow nextEntityOffset until null for every eligible entity.",
+      inputSchema: z.object({
+        from: date.optional(),
+        to: date.optional(),
+        bucket: z.enum(["day", "week", "month", "year"]).default("month"),
+        dimension: z.enum(["artist", "album"]).default("artist"),
+        minPlays: z.number().int().min(1).max(1_000_000).default(1),
+        entityOffset: z.number().int().min(0).max(1_000_000).default(0),
+        limitEntities: z.number().int().min(1).max(5_000).default(250),
+        includeEmptyBuckets: z.boolean().default(true),
+        maxCells: z.number().int().min(1).max(500_000).default(100_000),
+      }),
+      outputSchema: jsonObjectSchema,
+      annotations: { ...readOnly, openWorldHint: false },
+    },
+    ({ from, to, bucket, dimension, minPlays, entityOffset, limitEntities, includeEmptyBuckets, maxCells }) => runMatrixTool(() => Promise.resolve(service.getListeningMatrix({
+      ...(from === undefined ? {} : { from: parseDateTime(from, "from") }),
+      ...(to === undefined ? {} : { to: parseDateTime(to, "to") }),
+      bucket,
+      dimension,
+      minPlays,
+      entityOffset,
+      limitEntities,
+      includeEmptyBuckets,
+      maxCells,
+    }))),
+  );
+
+  server.registerTool(
     "detect_listening_eras",
     {
       title: "Detect listening eras",
@@ -311,6 +343,31 @@ async function runTool(operation: () => Promise<unknown>) {
     const structuredContent = isObject(output) ? output : { value: output };
     return {
       content: [{ type: "text" as const, text: JSON.stringify(structuredContent, null, 2) }],
+      structuredContent,
+    };
+  } catch (error) {
+    return {
+      content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Unknown error" }],
+      isError: true,
+    };
+  }
+}
+
+async function runMatrixTool(operation: () => Promise<unknown>) {
+  try {
+    const output = await operation();
+    const structuredContent = isObject(output) ? output : { value: output };
+    const matrix = isObject(structuredContent.matrix) ? structuredContent.matrix : {};
+    const filtering = isObject(structuredContent.filtering) ? structuredContent.filtering : {};
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          message: "The complete listening-matrix page is available in structuredContent.",
+          matrix: { format: matrix.format, dimensions: matrix.dimensions },
+          filtering,
+        }),
+      }],
       structuredContent,
     };
   } catch (error) {
