@@ -5,8 +5,6 @@ import { EXPOSURE_LEVELS, RECOMMENDATION_MODES, type IntelligenceService } from 
 import { parseDateTime } from "./time.js";
 
 const jsonObjectSchema = z.object({}).loose();
-const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
-const localWrite = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const name = z.string().trim().min(1);
 const targetSchema = z.object({ artist: name.optional(), album: name.optional(), track: name.optional() });
 const dimensionsShape = Object.fromEntries(
@@ -19,9 +17,9 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
     {
       title: "Resolve canonical music entities",
       description: "Resolve deterministic canonical artist, album, and track identities plus aliases and synced MBIDs.",
-      inputSchema: targetSchema,
+      inputSchema: z.object({ artist: name.optional(), album: name.optional(), track: name.optional() }),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     (input) => runTool(() => Promise.resolve(service.canonicalize(cleanTarget(input)))),
   );
@@ -37,7 +35,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
         tracks: z.array(z.object({ artist: name, track: name })).max(100).optional(),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     ({ artists, albums, tracks }) => runTool(() => Promise.resolve(service.checkListeningExposure({
       ...(artists === undefined ? {} : { artists }),
@@ -53,7 +51,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
       description: "Measure play depth, active days/months, repeated sessions, long-term returns, concentration, and an explainable affinity score from local history.",
       inputSchema: z.object({ artist: name }),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     ({ artist }) => runTool(() => Promise.resolve(service.getArtistAffinity(artist))),
   );
@@ -71,7 +69,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
         limit: z.number().int().min(1).max(1_000).default(100),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     ({ from, to, artist, gapMinutes, limit }) => runTool(() => Promise.resolve(service.getListeningSessions({
       ...(from === undefined ? {} : { from: parseDateTime(from, "from") }),
@@ -89,7 +87,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
       description: "Analyze album track coverage, ordered/full/near-full runs, stopping points, and later returns using an ordered MusicBrainz tracklist when available.",
       inputSchema: z.object({ artist: name, album: name }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnly,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ artist, album }) => runTool(() => service.getAlbumExposure(artist, album)),
   );
@@ -107,7 +105,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
         limitPerBucket: z.number().int().min(1).max(100).default(20),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnly,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ from, to, bucket, dimension, limitPerBucket }) => runTool(() => service.getListeningTimeline({
       ...(from === undefined ? {} : { from: parseDateTime(from, "from") }),
@@ -135,7 +133,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
         maxCells: z.number().int().min(1).max(500_000).default(100_000),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     ({ from, to, bucket, dimension, minPlays, entityOffset, limitEntities, includeEmptyBuckets, maxCells }) => runMatrixTool(() => Promise.resolve(service.getListeningMatrix({
       ...(from === undefined ? {} : { from: parseDateTime(from, "from") }),
@@ -160,7 +158,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
         maxEras: z.number().int().min(1).max(50).default(12),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     (input) => runTool(() => Promise.resolve(service.detectListeningEras(input))),
   );
@@ -172,7 +170,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
       description: "Combine Last.fm tags/similarity with MusicBrainz genres, active years, country, members, and relationships. Does not fabricate audio features.",
       inputSchema: z.object({ artist: name }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnly,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ artist }) => runTool(() => service.getArtistFeatures(artist)),
   );
@@ -182,8 +180,9 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
     {
       title: "Build personal taste graph",
       description: "Build an evidence graph across artists, albums, tags, listening sessions, detected eras, external similarities, and explicit preference dimensions.",
+      inputSchema: z.object({}),
       outputSchema: jsonObjectSchema,
-      annotations: readOnly,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     () => runTool(() => service.buildTasteGraph()),
   );
@@ -193,13 +192,16 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
     {
       title: "Record explicit music feedback",
       description: "Persist a structured verdict for an artist, album, or track. Use not_now to distinguish timing from dislike.",
-      inputSchema: targetSchema.extend({
+      inputSchema: z.object({
+        artist: name.optional(),
+        album: name.optional(),
+        track: name.optional(),
         rating: z.number().min(0).max(10).optional(),
         verdict: z.enum(FEEDBACK_VERDICTS),
         notes: z.string().trim().max(4_000).optional(),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: localWrite,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     ({ artist, album, track, rating, verdict, notes }) => runTool(() => Promise.resolve(service.recordMusicFeedback({
       ...cleanTarget({ artist, album, track }),
@@ -220,7 +222,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
         notes: z.string().trim().max(4_000).optional(),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: localWrite,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     ({ target, dimensions, notes }) => runTool(() => Promise.resolve(service.recordPreferenceSignal({
       target: cleanTarget(target),
@@ -236,7 +238,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
       description: "Return structured feedback, taste-dimension signals, aggregate dimension evidence, and active recommendation exclusions.",
       inputSchema: z.object({ limit: z.number().int().min(1).max(1_000).default(200) }),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     ({ limit }) => runTool(() => Promise.resolve(service.getFeedbackContext(limit))),
   );
@@ -277,7 +279,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
         expiresAt: date.nullable().optional(),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: localWrite,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     ({ artist, reason, policy, expiresAt }) => runTool(() => Promise.resolve(service.excludeRecommendation({
       artist,
@@ -292,8 +294,9 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
     {
       title: "List active recommendation exclusions",
       description: "List active recommendation exclusions and their expiration/policy.",
+      inputSchema: z.object({}),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     () => runTool(() => Promise.resolve(service.listRecommendationExclusions())),
   );
@@ -311,7 +314,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
         mode: z.enum([...RECOMMENDATION_MODES, "manual"]).default("manual"),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: localWrite,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     ({ artist, recommendedAt, reason, recommendationId, mode }) => runTool(() => Promise.resolve(service.recordRecommendation({
       artist,
@@ -329,7 +332,7 @@ export function registerIntelligenceTools(server: McpServer, service: Intelligen
       description: "Measure whether recommendation recipients were untried, sampled, engaged, or revisited using post-recommendation scrobbles.",
       inputSchema: z.object({ since: date.optional() }),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     ({ since }) => runTool(() => Promise.resolve(service.evaluateRecommendations(since === undefined ? undefined : parseDateTime(since, "since")))),
   );

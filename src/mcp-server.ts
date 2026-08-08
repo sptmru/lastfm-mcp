@@ -9,7 +9,6 @@ import { parseDateTime } from "./time.js";
 const periodSchema = z.enum(LASTFM_PERIODS).describe("Last.fm chart period.");
 const topLimitSchema = z.number().int().min(1).max(1_000).default(100);
 const jsonObjectSchema = z.object({}).loose();
-const readOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
 export function createLastFmMcpServer(service: ListeningService, intelligence: IntelligenceService): McpServer {
   const server = new McpServer({ name: "lastfm-taste", version: "0.3.0" });
@@ -19,8 +18,9 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
     {
       title: "Get Last.fm profile",
       description: "Get the configured user's public Last.fm account totals and registration metadata.",
+      inputSchema: z.object({}),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     () => runTool(async () => ({ profile: await service.getUserProfile() })),
   );
@@ -33,7 +33,7 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
         "Summarize scrobbles, top artists, tracks, albums, and current/recent activity for one standard Last.fm period. Start here for a compact overview.",
       inputSchema: z.object({ period: periodSchema.default("overall") }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ period }) => runTool(() => service.getListeningSummary(period)),
   );
@@ -45,7 +45,7 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
       description: "Return the configured user's ranked Last.fm artists and play counts for a standard chart period.",
       inputSchema: z.object({ period: periodSchema.default("overall"), limit: topLimitSchema }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ period, limit }) => runTool(() => service.getTopArtists(period, limit)),
   );
@@ -57,7 +57,7 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
       description: "Return the configured user's ranked Last.fm tracks and play counts for a standard chart period.",
       inputSchema: z.object({ period: periodSchema.default("overall"), limit: topLimitSchema }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ period, limit }) => runTool(() => service.getTopTracks(period, limit)),
   );
@@ -69,7 +69,7 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
       description: "Return the configured user's ranked Last.fm albums and play counts; useful for album-oriented taste analysis.",
       inputSchema: z.object({ period: periodSchema.default("overall"), limit: topLimitSchema }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ period, limit }) => runTool(() => service.getTopAlbums(period, limit)),
   );
@@ -85,7 +85,7 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
         limit: z.number().int().min(1).max(1_000).default(100),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ from, to, limit }) =>
       runTool(() => service.getRecentTracks({
@@ -112,7 +112,7 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
         scanLimit: z.number().int().min(200).max(50_000).optional().describe("Maximum live scrobbles to scan when no local index exists."),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ artist, album, track, from, to, exactMatch, limit, scanLimit }) =>
       runTool(() => service.searchListeningHistory({
@@ -132,8 +132,9 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
     {
       title: "Get history index status",
       description: "Report local SQLite history coverage and whether a complete backfill has been confirmed.",
+      inputSchema: z.object({}),
       outputSchema: jsonObjectSchema,
-      annotations: { ...readOnlyAnnotations, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     () => runTool(async () => service.getHistoryStatus()),
   );
@@ -166,7 +167,7 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
         limit: z.number().int().min(1).max(100).default(25),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ periodA, periodB, limit }) => runTool(() => service.comparePeriods(periodA, periodB, limit)),
   );
@@ -177,8 +178,9 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
       title: "Build taste profile",
       description:
         "Build an evidence-backed music taste profile with core artists, favorite tracks/albums, discoveries, forgotten favorites, trends, repeat concentration, and album orientation. Includes confidence and methodology.",
+      inputSchema: z.object({}),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     () => runTool(() => service.getTasteProfile()),
   );
@@ -194,7 +196,7 @@ export function createLastFmMcpServer(service: ListeningService, intelligence: I
         autocorrect: z.boolean().default(true),
       }),
       outputSchema: jsonObjectSchema,
-      annotations: readOnlyAnnotations,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ artist, autocorrect }) => runTool(() => service.getArtistContext(artist, autocorrect)),
   );

@@ -21,7 +21,20 @@ describe("MCP server", () => {
     const json = raw.startsWith("event:")
       ? raw.split("\n").find((line) => line.startsWith("data: "))?.slice(6)
       : raw;
-    const payload = JSON.parse(json ?? "{}") as { result: { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }> } };
+    const payload = JSON.parse(json ?? "{}") as {
+      result: {
+        tools: Array<{
+          name: string;
+          inputSchema?: { type?: string };
+          annotations?: {
+            readOnlyHint?: boolean;
+            destructiveHint?: boolean;
+            idempotentHint?: boolean;
+            openWorldHint?: boolean;
+          };
+        }>;
+      };
+    };
     const names = payload.result.tools.map((tool) => tool.name);
 
     expect(response.status).toBe(200);
@@ -57,6 +70,18 @@ describe("MCP server", () => {
       "record_recommendation",
       "evaluate_recommendations",
     ]);
+    for (const tool of payload.result.tools) {
+      expect(tool.inputSchema?.type, `${tool.name} input schema`).toBe("object");
+      expect(Object.keys(tool.annotations ?? {}).sort(), `${tool.name} annotation keys`).toEqual([
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+        "readOnlyHint",
+      ]);
+      for (const value of Object.values(tool.annotations ?? {})) {
+        expect(typeof value, `${tool.name} annotation value`).toBe("boolean");
+      }
+    }
     expect(payload.result.tools.find((tool) => tool.name === "get_taste_profile")?.annotations?.readOnlyHint).toBe(true);
     expect(payload.result.tools.find((tool) => tool.name === "sync_listening_history")?.annotations?.readOnlyHint).toBe(false);
     expect(payload.result.tools.find((tool) => tool.name === "record_music_feedback")?.annotations?.readOnlyHint).toBe(false);
