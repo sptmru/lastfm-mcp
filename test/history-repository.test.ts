@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RecentTrack } from "../src/domain.js";
 import { HistoryRepository } from "../src/history-repository.js";
@@ -12,6 +13,42 @@ afterEach(() => {
 });
 
 describe("HistoryRepository", () => {
+  it("adds persistent incremental progress to an existing database without losing sync state", () => {
+    const directory = mkdtempSync(join(tmpdir(), "lastfm-mcp-migration-"));
+    const path = join(directory, "history.sqlite");
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      CREATE TABLE sync_state (
+        username TEXT PRIMARY KEY,
+        full_history_synced INTEGER NOT NULL DEFAULT 0,
+        last_sync_at_unix INTEGER,
+        last_sync_mode TEXT,
+        coverage_through_unix INTEGER,
+        full_sync_cursor_unix INTEGER,
+        full_sync_upper_unix INTEGER
+      );
+      INSERT INTO sync_state VALUES ('listener', 1, 100, 'full', 100, NULL, NULL);
+    `);
+    legacy.close();
+    const repository = new HistoryRepository(path);
+    repositories.push(repository);
+    expect(repository.getStatus("listener")).toMatchObject({ fullHistorySynced: true,
+      coveredThroughAt: new Date(100 * 1000).toISOString(), incrementalSyncInProgress: false });
+    const progress = { cursorUnix: 90, upperUnix: 200, boundaryKeys: ['["artist","album","track"]'] };
+    repository.setIncrementalSyncProgress("listener", progress);
+    expect(repository.getIncrementalSyncProgress("other-listener")).toBeNull();
+
+    // Open a second connection to verify persisted state and idempotent migration.
+    const reopened = new HistoryRepository(path);
+    repositories.push(reopened);
+    expect(reopened.getIncrementalSyncProgress("listener")).toEqual(progress);
+    expect(reopened.getStatus("listener").incrementalSyncInProgress).toBe(true);
+    reopened.clearIncrementalSyncProgress("listener");
+    expect(repository.getIncrementalSyncProgress("listener")).toBeNull();
+    expect(repository.getStatus("listener")).toMatchObject({ fullHistorySynced: true,
+      coveredThroughAt: new Date(100 * 1000).toISOString(), incrementalSyncInProgress: false });
+  });
+
   it("deduplicates, searches, aggregates, and tracks sync coverage", () => {
     const repository = createRepository();
     const tracks = [

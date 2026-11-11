@@ -111,6 +111,12 @@ You can also invoke the MCP tool `sync_listening_history` (when `MCP_ENABLE_MUTA
 
 If a full sync reaches `HISTORY_MAX_SYNC_TRACKS`, call it again. The server persists the oldest backfill cursor and resumes from it; it does not redownload the same newest slice. Incremental syncs with a capped backlog advance oldest-first so no middle segment is skipped. `coveredThroughAt` advances only after the requested range is complete.
 
+Incremental syncs also re-read the `HISTORY_INCREMENTAL_LOOKBACK_HOURS` before the newest indexed scrobble to recover late, out-of-order arrivals, including plays relayed from Spotify. The default is **72 hours**; valid values are integers from **0 to 720**. Set it to `0` to use the strict newest-scrobble cursor for new passes. Repeated records are upserted without adding duplicate rows.
+
+The `maxTracks` budget includes re-read records. If the window and new backlog exceed it, call incremental sync again: SQLite preserves the unfinished pass's cursor and fixed upper time boundary across process restarts. `get_history_status` reports `incrementalSyncInProgress=true`, and `completedRequestedRange` remains `false` until that pass is fully read. Coverage then advances to the pass's original upper boundary; plays arriving beyond it are fetched by the next pass. Configuration changes apply to new passes; an unfinished pass first resumes its saved range.
+
+A play arriving behind an active cursor is recovered by a subsequent pass if its timestamp is still within that pass's lookback window. Omissions older than the window require a larger lookback (up to 720 hours) or separate historical reconciliation; this setting does not automatically repair the entire past history.
+
 The index is stored in the `lastfm-data` named volume as normalized SQLite data rather than raw Last.fm responses. Intelligence tools lazily backfill canonical entity keys and alias catalogs after each sync, so an existing v0.1 database is migrated in place.
 
 The full sync is foundational: without it, first-listen dates, long-term returns, eras, exposure filtering, and recommendation evaluation can be incomplete. Every affected response includes the current history status and a caveat when `fullHistorySynced=false`.
